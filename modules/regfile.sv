@@ -1,7 +1,9 @@
 `timescale 1ps/1ps
 module regfile
 import riscv_pkg::*;
-(
+#(
+  parameter bit ENABLE_WB_BYPASS = 1'b0
+)(
     input  logic                  clk,
     input  logic                  rst,
     input  logic                  we,
@@ -23,7 +25,16 @@ import riscv_pkg::*;
     end
   end
 
-  assign rs1_data = (rs1_addr == '0) ? '0 : regs[rs1_addr];
-  assign rs2_data = (rs2_addr == '0) ? '0 : regs[rs2_addr];
+  if (ENABLE_WB_BYPASS) begin : g_bypass
+    assign rs1_data = (rs1_addr == '0) ? '0
+                     : (we && (rd_addr == rs1_addr)) ? rd_data
+                     : regs[rs1_addr];
+    assign rs2_data = (rs2_addr == '0) ? '0
+                     : (we && (rd_addr == rs2_addr)) ? rd_data
+                     : regs[rs2_addr];
+  end else begin : g_no_bypass
+    assign rs1_data = (rs1_addr == '0) ? '0 : regs[rs1_addr];
+    assign rs2_data = (rs2_addr == '0) ? '0 : regs[rs2_addr];
+  end
 
 endmodule

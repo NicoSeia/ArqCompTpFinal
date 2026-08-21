@@ -117,8 +117,67 @@ package riscv_pkg;
   } instr_fields_t;
 
   // ---------------------------------------------------------------------------
-  // Pendiente (paso 3 del plan): structs de latches de pipeline
-  // if_id_t, id_ex_t, ex_mem_t, mem_wb_t
+  // Latches de pipeline (paso 3 del plan)
+  //
+  // Decisión de diseño: los branches/jumps se resuelven en EX (igual que en
+  // el diseño clásico de libro), no en ID. Consecuencia: cuando se toma un
+  // salto, IF ya trajo 2 instrucciones de más (la que sigue al branch, y la
+  // siguiente a esa) que hay que flushear -> penalidad de 3 ciclos.
+  //
+  // Por eso PC+4 se calcula en IF (no depende de decodificar nada) y viaja
+  // en todos los latches hasta WB, donde jal/jalr lo necesitan para escribir
+  // la dirección de retorno en rd. El target de branch/jal (pc+imm) y el de
+  // jalr (rs1+imm) se calculan recién en EX, y de ahí sale directo la señal
+  // de redirect + flush hacia IF - no viajan en los latches porque no son
+  // datos que se propaguen etapa a etapa, son una corrección puntual del PC.
   // ---------------------------------------------------------------------------
+ 
+  // IF/ID: lo mínimo que ID necesita para decodificar
+  typedef struct packed {
+    logic [31:0] pc;
+    logic [31:0] pc_plus4;
+    logic [31:0] instr;
+  } if_id_t;
+ 
+  // ID/EX: instrucción ya decodificada, lista para ejecutar
+  typedef struct packed {
+    logic [31:0]           pc;         // para pc_target = pc + imm en EX
+    logic [31:0]           pc_plus4;   // viaja hasta WB (jal/jalr)
+    logic [31:0]           rs1_data;
+    logic [31:0]           rs2_data;
+    logic [31:0]           imm;
+    logic [REG_ADDR_W-1:0] rs1;        // número de registro (no el dato) -> forwarding futuro
+    logic [REG_ADDR_W-1:0] rs2;
+    logic [REG_ADDR_W-1:0] rd;
+    logic [2:0]             funct3;     // distingue beq/bne en EX
+    ctrl_t                  ctrl;
+  } id_ex_t;
+ 
+  // EX/MEM: resultado de la ALU, listo para memoria o para WB directo
+  typedef struct packed {
+    logic [31:0]           alu_result;
+    logic [31:0]           rs2_data;   // dato a guardar si es store
+    logic [REG_ADDR_W-1:0] rd;
+    logic [31:0]           pc_plus4;
+    ctrl_t                  ctrl;
+  } ex_mem_t;
+ 
+  // MEM/WB: lo que sea que se termine escribiendo en el banco de registros
+  typedef struct packed {
+    logic [31:0]           mem_data;
+    logic [31:0]           alu_result;
+    logic [31:0]           pc_plus4;
+    logic [REG_ADDR_W-1:0] rd;
+    ctrl_t                  ctrl;
+  } mem_wb_t;
+
+  // ---------------------------------------------------------------------------
+  // Fuente del forwarding (paso 3 del plan: unidad de riesgos)
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    FWD_NONE,     // usar el valor que ya trajo el regfile en ID
+    FWD_EX_MEM,   // forward desde ex_mem_q.alu_result (instrucción inmediatamente anterior, gap=1)
+    FWD_MEM_WB    // forward desde el dato de write-back (dos instrucciones antes, gap=2)
+  } fwd_src_e;
 
 endpackage

@@ -21,10 +21,11 @@ module next_pc_logic
 
   always_comb begin
     if (ctrl.jump) begin
-      if (ctrl.jalr)
+      if (ctrl.jalr) begin
         pc_next = (rs1_data + imm) & ~32'd1;  // jalr: target = rs1+imm, bit0 limpio
-      else
+      end else begin
         pc_next = pc_target;                   // jal: target = pc+imm
+      end
     end else if (branch_taken) begin
       pc_next = pc_target;
     end else begin
