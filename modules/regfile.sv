@@ -6,16 +6,25 @@ import riscv_pkg::*;
 )(
     input  logic                  clk,
     input  logic                  rst,
+    input  logic                  enable = 1'b1,
     input  logic                  we,
     input  logic [REG_ADDR_W-1:0] rs1_addr,
     input  logic [REG_ADDR_W-1:0] rs2_addr,
     input  logic [REG_ADDR_W-1:0] rd_addr,
     input  logic [XLEN-1:0]       rd_data,
+    input  logic [REG_ADDR_W-1:0] debug_addr = '0,
     output logic [XLEN-1:0]       rs1_data,
-    output logic [XLEN-1:0]       rs2_data
+    output logic [XLEN-1:0]       rs2_data,
+    output logic [XLEN-1:0]       debug_data
 );
 
   logic [XLEN-1:0] regs [1:31];  // x0 no se almacena, se resuelve por MUX
+
+  // Escritura efectiva: solo cuenta si realmente hay we Y el sistema esta
+  // habilitado. Tanto el flip-flop como el bypass usan esta misma señal,
+  // para que los dos vean exactamente la misma realidad.
+  logic we_eff;
+  assign we_eff = we && enable;
 
   always_ff @(posedge clk) begin
     if (rst) begin
@@ -36,5 +45,7 @@ import riscv_pkg::*;
     assign rs1_data = (rs1_addr == '0) ? '0 : regs[rs1_addr];
     assign rs2_data = (rs2_addr == '0) ? '0 : regs[rs2_addr];
   end
+
+   assign debug_data = (debug_addr == '0) ? '0 : regs[debug_addr];
 
 endmodule

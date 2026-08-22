@@ -11,7 +11,7 @@
 // -----------------------------------------------------------------------------
 
 package riscv_pkg;
-
+ 
   // ---------------------------------------------------------------------------
   // Parámetros generales
   // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ package riscv_pkg;
   parameter int REG_ADDR_W  = 5;   // 32 registros -> 5 bits
   parameter int IMEM_ADDR_W = 10;  // ajustar según tamaño real de memoria de programa
   parameter int DMEM_ADDR_W = 12;  // ajustar según tamaño real de memoria de datos
-
+ 
   // ---------------------------------------------------------------------------
   // Opcodes (bits [6:0] de la instrucción) - subset implementado
   // ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ package riscv_pkg;
     OP_LUI    = 7'b0110111,  // U-type (lui)
     OP_JAL    = 7'b1101111   // J-type (jal)
   } opcode_e;
-
+ 
   // ---------------------------------------------------------------------------
   // Operación interna de ALU (ya decodificada por el control unit,
   // no es el encoding crudo de funct3/funct7)
@@ -51,7 +51,7 @@ package riscv_pkg;
     ALU_AND,
     ALU_PASS   // resultado = b, sin usar a (lui carga el inmediato directo)
   } alu_op_e;
-
+ 
   // ---------------------------------------------------------------------------
   // Tipo de inmediato -> selecciona el generador de inmediato en Decode
   // ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ package riscv_pkg;
     IMM_J,
     IMM_X   // no aplica (R-type no usa inmediato)
   } imm_src_e;
-
+ 
   // ---------------------------------------------------------------------------
   // Tamaño de acceso a memoria de datos (load/store)
   // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ package riscv_pkg;
     MEM_HALF,
     MEM_WORD
   } mem_size_e;
-
+ 
   // ---------------------------------------------------------------------------
   // Origen del dato que se escribe en rd (reemplaza al viejo mem_to_reg de 1 bit,
   // que solo alcanzaba para elegir entre ALU y memoria: jal/jalr necesitan
@@ -83,7 +83,7 @@ package riscv_pkg;
     WB_MEM,
     WB_PC4
   } wb_src_e;
-
+ 
   // ---------------------------------------------------------------------------
   // Señales de control generadas en Decode
   // ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ package riscv_pkg;
     mem_size_e mem_size;
     imm_src_e  imm_src;
   } ctrl_t;
-
+ 
   // ---------------------------------------------------------------------------
   // Campos genéricos de la instrucción cruda (posiciones fijas del ISA:
   // opcode, rd, funct3, rs1, rs2 y funct7 siempre caen en el mismo rango
@@ -115,7 +115,7 @@ package riscv_pkg;
     logic [4:0] rd;
     logic [6:0] opcode;
   } instr_fields_t;
-
+ 
   // ---------------------------------------------------------------------------
   // Latches de pipeline (paso 3 del plan)
   //
@@ -134,6 +134,13 @@ package riscv_pkg;
  
   // IF/ID: lo mínimo que ID necesita para decodificar
   typedef struct packed {
+    logic        valid;     // 0 en un bubble estructural (reset o flush);
+                             // 1 en cualquier fetch real, aunque sea basura
+                             // mas alla del programa. Sin esto, un bubble
+                             // (instr=0, el mismo encoding que "ilegal")
+                             // dispararía halt por ilegal apenas arranca
+                             // el pipeline, antes de la primera instrucción
+                             // real.
     logic [31:0] pc;
     logic [31:0] pc_plus4;
     logic [31:0] instr;
@@ -141,6 +148,7 @@ package riscv_pkg;
  
   // ID/EX: instrucción ya decodificada, lista para ejecutar
   typedef struct packed {
+    logic                  valid;      // propagado desde if_id_t (ver ahí)
     logic [31:0]           pc;         // para pc_target = pc + imm en EX
     logic [31:0]           pc_plus4;   // viaja hasta WB (jal/jalr)
     logic [31:0]           rs1_data;
@@ -155,6 +163,7 @@ package riscv_pkg;
  
   // EX/MEM: resultado de la ALU, listo para memoria o para WB directo
   typedef struct packed {
+    logic                  valid;      // propagado desde id_ex_t
     logic [31:0]           alu_result;
     logic [31:0]           rs2_data;   // dato a guardar si es store
     logic [REG_ADDR_W-1:0] rd;
@@ -164,13 +173,14 @@ package riscv_pkg;
  
   // MEM/WB: lo que sea que se termine escribiendo en el banco de registros
   typedef struct packed {
+    logic                  valid;      // propagado desde ex_mem_t
     logic [31:0]           mem_data;
     logic [31:0]           alu_result;
     logic [31:0]           pc_plus4;
     logic [REG_ADDR_W-1:0] rd;
     ctrl_t                  ctrl;
   } mem_wb_t;
-
+ 
   // ---------------------------------------------------------------------------
   // Fuente del forwarding (paso 3 del plan: unidad de riesgos)
   // ---------------------------------------------------------------------------
@@ -179,5 +189,15 @@ package riscv_pkg;
     FWD_EX_MEM,   // forward desde ex_mem_q.alu_result (instrucción inmediatamente anterior, gap=1)
     FWD_MEM_WB    // forward desde el dato de write-back (dos instrucciones antes, gap=2)
   } fwd_src_e;
+ 
+  // ---------------------------------------------------------------------------
+  // Código de HALT (sección 2 del README): distingue las dos causas para la
+  // respuesta de 1 byte que RUN/STEP le deben al host (sección 4)
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    HALT_NONE,     // sigue corriendo
+    HALT_RANGE,    // PC se fue mas alla del programa cargado
+    HALT_ILLEGAL   // instruccion no reconocida por control_unit
+  } halt_code_e;
 
 endpackage

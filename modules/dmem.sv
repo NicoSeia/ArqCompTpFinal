@@ -5,13 +5,16 @@ module dmem
     parameter int DEPTH_BYTES = (1 << DMEM_ADDR_W)
 ) (
     input  logic                   clk,
+    input  logic                   enable = 1'b1,
     input  logic                   mem_read,
     input  logic                   mem_write,
     input  mem_size_e              mem_size,
     input  logic                   mem_unsigned,
     input  logic [DMEM_ADDR_W-1:0] addr,   // dirección de byte
     input  logic [XLEN-1:0]        wdata,
-    output logic [XLEN-1:0]        rdata
+    input  logic [DMEM_ADDR_W-1:0] debug_addr = '0,
+    output logic [XLEN-1:0]        rdata,
+    output logic [7:0]             debug_data
 );
 
   logic [7:0] mem[0:DEPTH_BYTES-1];
@@ -34,7 +37,7 @@ module dmem
 
   // --- Escritura síncrona ---
   always_ff @(posedge clk) begin
-    if (mem_write) begin
+    if (mem_write && enable) begin
       unique case (mem_size)
         MEM_BYTE: mem[addr] <= wdata[7:0];
         MEM_HALF: begin
@@ -51,5 +54,7 @@ module dmem
       endcase
     end
   end
+
+  assign debug_data = mem[debug_addr];
 
 endmodule

@@ -1,5 +1,6 @@
 PKG = modules/riscv_pkg.sv
 BUILD_DIR = build
+DEBUG_DIR = debug_link
 MODULES = $(PKG) \
           modules/pc_reg.sv \
           modules/imem.sv \
@@ -14,8 +15,13 @@ PIPELINE_SRCS = modules/pc_reg.sv modules/imem.sv modules/regfile.sv modules/imm
                 modules/control_unit.sv modules/alu.sv modules/dmem.sv modules/branch_resolve.sv \
                 modules/pipe_reg.sv modules/forward_unit.sv modules/hazard_detect.sv modules/pipeline_top.sv
 
+SYSTEM_SRCS = $(PIPELINE_SRCS) $(DEBUG_DIR)/debug_unit.sv \
+              $(DEBUG_DIR)/baud_rate_gen.sv $(DEBUG_DIR)/uart_rx.sv \
+              $(DEBUG_DIR)/uart_tx.sv $(DEBUG_DIR)/rx_fifo.sv \
+              modules/system_top.sv
+
 # Regla por defecto: corre todos los módulos en orden
-all: alu regfile regfile_bypass imem dmem imm_gen control_unit next_pc_logic pipe_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top
+all: alu regfile regfile_bypass imem dmem imm_gen control_unit next_pc_logic pipe_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top debug_unit system_top
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -79,6 +85,15 @@ hazard_detect: $(BUILD_DIR)
 pipeline_top: $(BUILD_DIR)
 	iverilog -g2012 -o $(BUILD_DIR)/pipeline_top.vvp $(PKG) $(PIPELINE_SRCS) tb/tb_pipeline_top.sv
 	vvp $(BUILD_DIR)/pipeline_top.vvp
+
+# Debug unit: FSM
+debug_unit: $(BUILD_DIR)
+	iverilog -g2012 -o $(BUILD_DIR)/debug_unit.vvp $(PKG) $(DEBUG_DIR)/debug_unit.sv tb/tb_debug_unit.sv
+	vvp $(BUILD_DIR)/debug_unit.vvp
+
+system_top: $(BUILD_DIR)
+	iverilog -g2012 -o $(BUILD_DIR)/system_top.vvp $(PKG) $(SYSTEM_SRCS) tb/tb_system_top.sv
+	vvp $(BUILD_DIR)/system_top.vvp
 
 clean:
 	rm -rf $(BUILD_DIR) *.vcd
