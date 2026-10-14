@@ -12,7 +12,7 @@ MODULES = modules/pc_reg.v \
           modules/imm_gen.v \
           modules/regfile.v \
           modules/alu.v \
-          modules/dmem.v \
+          modules/dmem_comb.v \
           modules/next_pc_logic.v
 
 # Los 4 latches de pipeline: antes era un unico modules/pipe_reg.v generico
@@ -22,7 +22,8 @@ MODULES = modules/pc_reg.v \
 PIPE_REGS = modules/if_id_reg.v modules/id_ex_reg.v modules/ex_mem_reg.v modules/mem_wb_reg.v
 
 PIPELINE_SRCS = modules/pc_reg.v modules/imem.v modules/regfile.v modules/imm_gen.v \
-                modules/control_unit.v modules/alu.v modules/dmem.v modules/branch_resolve.v \
+                modules/control_unit.v modules/alu.v modules/dmem.v modules/store_align.v modules/load_extract.v \
+                modules/branch_resolve.v \
                 $(PIPE_REGS) modules/forward_unit.v modules/hazard_detect.v modules/pipeline_top.v
 
 SYSTEM_SRCS = $(PIPELINE_SRCS) $(DEBUG_DIR)/debug_unit.v \
@@ -31,7 +32,7 @@ SYSTEM_SRCS = $(PIPELINE_SRCS) $(DEBUG_DIR)/debug_unit.v \
               modules/system_top.v
 
 # Regla por defecto: corre todos los módulos en orden
-all: alu regfile regfile_bypass imem dmem imm_gen control_unit next_pc_logic if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top debug_unit system_top
+all: alu regfile regfile_bypass imem dmem dmem_comb store_align load_extract imm_gen control_unit next_pc_logic if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top pipeline_mem debug_unit system_top
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -40,9 +41,23 @@ alu: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/alu.vvp modules/alu.v tb/tb_alu.v
 	vvp $(BUILD_DIR)/alu.vvp
 
+# dmem = BRAM (palabra 32b, byte-enable, lectura sincrona). dmem_comb = la
+# vieja combinacional, solo para el monociclo de referencia (no va a la FPGA).
 dmem: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/dmem.vvp modules/dmem.v tb/tb_dmem.v
 	vvp $(BUILD_DIR)/dmem.vvp
+
+dmem_comb: $(BUILD_DIR)
+	iverilog $(IVFLAGS) -o $(BUILD_DIR)/dmem_comb.vvp modules/dmem_comb.v tb/tb_dmem_comb.v
+	vvp $(BUILD_DIR)/dmem_comb.vvp
+
+store_align: $(BUILD_DIR)
+	iverilog $(IVFLAGS) -o $(BUILD_DIR)/store_align.vvp modules/store_align.v tb/tb_store_align.v
+	vvp $(BUILD_DIR)/store_align.vvp
+
+load_extract: $(BUILD_DIR)
+	iverilog $(IVFLAGS) -o $(BUILD_DIR)/load_extract.vvp modules/load_extract.v tb/tb_load_extract.v
+	vvp $(BUILD_DIR)/load_extract.vvp
 
 imem: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/imem.vvp modules/imem.v tb/tb_imem.v
@@ -109,6 +124,11 @@ pipeline_top: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/pipeline_top.vvp $(PIPELINE_SRCS) tb/tb_pipeline_top.v
 	vvp $(BUILD_DIR)/pipeline_top.vvp
 
+# Camino de memoria completo (sb/sh/sw, lb/lbu/lh/lhu/lw, load-use, enable aleatorio + debug aleatorio)
+pipeline_mem: $(BUILD_DIR)
+	iverilog $(IVFLAGS) -o $(BUILD_DIR)/pipeline_mem.vvp $(PIPELINE_SRCS) tb/tb_pipeline_mem.v
+	vvp $(BUILD_DIR)/pipeline_mem.vvp
+
 # Debug unit: FSM
 debug_unit: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/debug_unit.vvp $(DEBUG_DIR)/debug_unit.v tb/tb_debug_unit.v
@@ -121,4 +141,4 @@ system_top: $(BUILD_DIR)
 clean:
 	rm -rf $(BUILD_DIR) *.vcd
 
-.PHONY: all clean alu dmem imem imm_gen next_pc_logic regfile regfile_bypass control_unit datapath_singlecycle if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect pipeline_top debug_unit system_top
+.PHONY: all clean alu dmem dmem_comb store_align load_extract imem imm_gen next_pc_logic regfile regfile_bypass control_unit datapath_singlecycle if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect pipeline_top pipeline_mem debug_unit system_top

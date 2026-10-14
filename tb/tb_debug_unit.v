@@ -59,8 +59,12 @@ module tb_debug_unit;
   reg [31:0] regfile_model [0:31];
   assign regfile_debug_data = regfile_model[regfile_debug_addr];
 
+  // El modelo es SINCRONO (1 ciclo de latencia), igual que el puerto de
+  // debug de la dmem real (BRAM): la FSM tiene que esperar un ciclo.
   reg [7:0] dmem_model [0:(1 << `DMEM_ADDR_W)-1];
-  assign dmem_debug_data = dmem_model[dmem_debug_addr];
+  reg [7:0] dmem_debug_data_q;
+  always @(posedge clk) dmem_debug_data_q <= dmem_model[dmem_debug_addr];
+  assign dmem_debug_data = dmem_debug_data_q;
 
   // Anchos calculados igual que en debug_unit.v, para no duplicar
   // constantes a mano -- si algun latch cambia de tamaño, esto se ajusta solo.

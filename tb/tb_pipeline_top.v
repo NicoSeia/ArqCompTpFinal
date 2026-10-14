@@ -145,10 +145,10 @@ module tb_pipeline_top;
     expect_reg(25, 32'd13,         "x25 = ori x1,8");
 
     checks = checks + 1;
-    if ({dut.u_dmem.mem[3], dut.u_dmem.mem[2], dut.u_dmem.mem[1], dut.u_dmem.mem[0]} !== 32'd15) begin
+    if (dut.u_dmem.mem[0] !== 32'd15) begin
       errors = errors + 1;
       $display("ERROR: mem[0] = %08h (esperado 15)",
-               {dut.u_dmem.mem[3], dut.u_dmem.mem[2], dut.u_dmem.mem[1], dut.u_dmem.mem[0]});
+               dut.u_dmem.mem[0]);
     end
 
     if (errors == 0)

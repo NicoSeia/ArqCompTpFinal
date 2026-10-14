@@ -63,7 +63,7 @@ module datapath_singlecycle (
   // ---- Memoria de datos ----
   wire [31:0] dmem_rdata;
   wire [7:0]  dmem_debug_data_unused;
-  dmem u_dmem (
+  dmem_comb u_dmem (
       .clk(clk), .enable(1'b1), .mem_read(ctrl_mem_read), .mem_write(ctrl_mem_write),
       .mem_size(ctrl_mem_size), .mem_unsigned(ctrl_mem_unsigned),
       .addr(alu_result[`DMEM_ADDR_W-1:0]), .wdata(rs2_data), .rdata(dmem_rdata),

@@ -174,13 +174,27 @@ module pipeline_top (
   assign ifid_d_pc_plus4 = pc_plus4_if;
   assign ifid_d_instr    = instr_if;
 
+  // Los flush solo valen cuando el pipeline AVANZA (run_enable=1). En los
+  // latches un flush tiene prioridad sobre un stall, asi que sin esta
+  // condicion, en un ciclo pausado (STEP / enable=0) el flush destruia
+  // contenido que todavia no habia avanzado:
+  //   - ID/EX con stall_load_use: borraba el load que esta en EX aunque
+  //     EX/MEM no lo habia tomado (el load se perdia).
+  //   - IF/ID con halt: borraba la ultima instruccion que aun no habia
+  //     pasado a ID/EX.
+  // Ademas, el flush de IF/ID por halt se omite mientras hay stall_load_use:
+  // IF/ID esta SOSTENIENDO una instruccion valida que todavia no se emitio
+  // (la dependiente del load); se flushea recien cuando el stall termina.
+  wire if_id_flush = run_enable && (redirect || ((halt_trigger || halt_latched) && !stall_load_use));
+  wire id_ex_flush = run_enable && (redirect || stall_load_use);
+
   // flush por halt: usa halt_trigger (combinacional) para cortar YA en el
   // mismo ciclo en que se detecta -- si usara solo halt_latched (que recién
   // vale 1 el ciclo siguiente) se colaría una instrucción de más antes de
   // que el flush hiciera efecto. halt_latched sostiene el flush después,
   // una vez que if_id_q ya dejó de mostrar la condición que lo disparó.
   if_id_reg u_if_id (
-      .clk(clk), .rst(rst), .flush(redirect || halt_trigger || halt_latched), .stall(stall_load_use || !run_enable),
+      .clk(clk), .rst(rst), .flush(if_id_flush), .stall(stall_load_use || !run_enable),
       .d_valid(ifid_d_valid), .d_pc(ifid_d_pc), .d_pc_plus4(ifid_d_pc_plus4), .d_instr(ifid_d_instr),
       .q_valid(ifid_q_valid), .q_pc(ifid_q_pc), .q_pc_plus4(ifid_q_pc_plus4), .q_instr(ifid_q_instr)
   );
@@ -244,7 +258,7 @@ module pipeline_top (
   assign idex_d_imm_src      = ctrl_id_imm_src;
 
   id_ex_reg u_id_ex (
-      .clk(clk), .rst(rst), .flush(redirect || stall_load_use), .stall(!run_enable),
+      .clk(clk), .rst(rst), .flush(id_ex_flush), .stall(!run_enable),
       .d_valid(idex_d_valid), .d_pc(idex_d_pc), .d_pc_plus4(idex_d_pc_plus4),
       .d_rs1_data(idex_d_rs1_data), .d_rs2_data(idex_d_rs2_data), .d_imm(idex_d_imm),
       .d_rs1(idex_d_rs1), .d_rs2(idex_d_rs2), .d_rd(idex_d_rd), .d_funct3(idex_d_funct3),
@@ -363,22 +377,35 @@ module pipeline_top (
   );
 
   // ============================================================ MEM
-  wire [31:0] dmem_rdata_mem;
+  // dmem es una BRAM (palabra de 32 bits, escritura por byte, lectura
+  // sincrona), igual que la de los companeros:
+  //   - store_align arma la mascara de bytes y el dato alineado (solo
+  //     accesos alineados; un store desalineado no escribe).
+  //   - la direccion se presenta ahora, en MEM, y la palabra leida sale
+  //     REGISTRADA en el ciclo siguiente, cuando la instruccion ya esta en
+  //     WB. Esa salida registrada de la BRAM reemplaza al campo mem_data
+  //     del latch MEM/WB (memwb_d_mem_data queda atado a 0, mas abajo).
+  //   - el puerto B de la BRAM es el puerto de debug (DUMP_MEM): es
+  //     independiente, asi no pisa el dato del load que esta en WB.
+  wire [3:0]  dmem_we;
+  wire [31:0] dmem_wdata;
+  wire [31:0] dmem_rdata_wb;   // palabra cruda de la BRAM, valida durante WB
 
-  // Antes hacía falta un wire intermedio (alu_result_mem) porque Verilog
-  // no permite encadenar selecciones (x[a:b][c:d]) sobre una expresión de
-  // bus. Ahora exmem_q_alu_result ya es un wire propio (puerto con
-  // nombre del latch), así que se puede indexar directo.
+  store_align u_store_align (
+      .mem_write(exmem_q_mem_write), .mem_size(exmem_q_mem_size),
+      .addr_lo(exmem_q_alu_result[1:0]), .wdata(exmem_q_rs2_data),
+      .byte_en(dmem_we), .wdata_aligned(dmem_wdata)
+  );
+
   dmem u_dmem (
-      .clk(clk), .enable(run_enable), .mem_read(exmem_q_mem_read), .mem_write(exmem_q_mem_write),
-      .mem_size(exmem_q_mem_size), .mem_unsigned(exmem_q_mem_unsigned),
-      .addr(exmem_q_alu_result[`DMEM_ADDR_W-1:0]), .wdata(exmem_q_rs2_data),
-      .rdata(dmem_rdata_mem),
+      .clk(clk), .enable(run_enable),
+      .addr(exmem_q_alu_result[`DMEM_ADDR_W-1:0]), .wdata(dmem_wdata), .we(dmem_we),
+      .rdata(dmem_rdata_wb),
       .debug_addr(dmem_debug_addr), .debug_data(dmem_debug_data)
   );
 
   assign memwb_d_valid      = exmem_q_valid;
-  assign memwb_d_mem_data   = dmem_rdata_mem;
+  assign memwb_d_mem_data   = 32'd0;  // sin uso: el dato del load lo da la salida registrada de la BRAM
   assign memwb_d_alu_result = exmem_q_alu_result;
   assign memwb_d_pc_plus4   = exmem_q_pc_plus4;
   assign memwb_d_rd         = exmem_q_rd;
@@ -413,10 +440,18 @@ module pipeline_top (
   );
 
   // ============================================================ WB
+  // La BRAM entrega la palabra completa; load_extract elige byte/halfword y
+  // extiende signo. wb_mem_data vale 0 si la instruccion en WB no es un load.
+  wire [31:0] wb_mem_data;
+  load_extract u_load_extract (
+      .mem_read(memwb_q_mem_read), .mem_size(memwb_q_mem_size), .mem_unsigned(memwb_q_mem_unsigned),
+      .addr_lo(memwb_q_alu_result[1:0]), .word(dmem_rdata_wb), .rdata(wb_mem_data)
+  );
+
   always @* begin
     case (memwb_q_wb_src)
       `WB_ALU: wb_data = memwb_q_alu_result;
-      `WB_MEM: wb_data = memwb_q_mem_data;
+      `WB_MEM: wb_data = wb_mem_data;
       `WB_PC4: wb_data = memwb_q_pc_plus4;
       default: wb_data = memwb_q_alu_result;
     endcase
@@ -447,7 +482,7 @@ module pipeline_top (
   };
 
   assign mem_wb_q_out = {
-      memwb_q_valid, memwb_q_mem_data, memwb_q_alu_result, memwb_q_pc_plus4, memwb_q_rd,
+      memwb_q_valid, wb_mem_data, memwb_q_alu_result, memwb_q_pc_plus4, memwb_q_rd,
       memwb_q_reg_write, memwb_q_mem_read, memwb_q_mem_write, memwb_q_wb_src, memwb_q_alu_src,
       memwb_q_branch, memwb_q_jump, memwb_q_jalr, memwb_q_mem_unsigned,
       memwb_q_alu_op, memwb_q_mem_size, memwb_q_imm_src

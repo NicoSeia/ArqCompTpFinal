@@ -68,6 +68,26 @@ module tb_system_top;
     end
   endfunction
 
+  function [31:0] stype(input [11:0] imm, input [4:0] rs2, input [4:0] rs1, input [2:0] funct3, input [6:0] opcode);
+    begin
+      stype = {imm[11:5], rs2, rs1, funct3, imm[4:0], opcode};
+    end
+  endfunction
+
+  task automatic host_load_word(input [31:0] w);
+    begin
+      host_send_byte(8'h01);
+      host_send_byte(w[7:0]);
+      host_send_byte(w[15:8]);
+      host_send_byte(w[23:16]);
+      host_send_byte(w[31:24]);
+      wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);
+      #1;
+    end
+  endtask
+
+  reg [7:0] expected_mem [0:5];
+
   // Variables que en SV eran locales a bloques begin/end sin nombre
   // (Verilog-2001 solo permite declarar dentro de bloques con nombre;
   // quedan a nivel de modulo, mas simple y equivalente).
@@ -125,6 +145,37 @@ module tb_system_top;
       if (host_received !== expected[b]) begin
         errors = errors + 1;
         $display("ERROR: [DUMP_REGS] x1 byte%0d = %02h (esperado %02h)", b, host_received, expected[b]);
+      end
+    end
+
+    // ======= 2do programa: stores + DUMP_MEM (dmem BRAM, lectura sincrona) =======
+    //   addi x1,x0,42 ; sw x1,8(x0) ; sb x1,13(x0)
+    host_send_byte(8'h00);   // RESET
+    wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);
+    #1;
+    host_load_word(itype(12'd42, 5'd0, 3'b000, 5'd1, `OP_IMM));
+    host_load_word(stype(12'd8,  5'd1, 5'd0, 3'b010, `OP_STORE));
+    host_load_word(stype(12'd13, 5'd1, 5'd0, 3'b000, `OP_STORE));
+
+    host_send_byte(8'h02);   // RUN
+    host_wait_byte;
+    checks = checks + 1;
+    if (host_received !== 8'h01) begin
+      errors = errors + 1;
+      $display("ERROR: [RUN 2] respuesta=%02h (esperado 01, halt por rango)", host_received);
+    end
+
+    host_send_byte(8'h06);                      // DUMP_MEM
+    host_send_byte(8'd8);  host_send_byte(8'd0);  // direccion = 8
+    host_send_byte(8'd6);  host_send_byte(8'd0);  // cantidad  = 6  (bytes 8..13)
+    expected_mem[0] = 8'h2A; expected_mem[1] = 8'h00; expected_mem[2] = 8'h00;
+    expected_mem[3] = 8'h00; expected_mem[4] = 8'h00; expected_mem[5] = 8'h2A;
+    for (b = 0; b < 6; b = b + 1) begin
+      host_wait_byte;
+      checks = checks + 1;
+      if (host_received !== expected_mem[b]) begin
+        errors = errors + 1;
+        $display("ERROR: [DUMP_MEM] mem[%0d] = %02h (esperado %02h)", 8 + b, host_received, expected_mem[b]);
       end
     end
 

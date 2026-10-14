@@ -87,7 +87,8 @@ module debug_unit (
     ST_DUMPMEM_TX       = 5'd18,  // chequea si queda algo por mandar y arma el byte actual
     ST_DUMPMEM_WAIT     = 5'd19,  // espera tx_done_tick, avanza direccion y decrementa cantidad
     ST_DUMPLATCHES_TX   = 5'd20,  // arma el byte actual (byte bajo del shift register) y pulsa tx_start
-    ST_DUMPLATCHES_WAIT = 5'd21;  // espera tx_done_tick, desplaza el shift register o pasa al proximo latch
+    ST_DUMPLATCHES_WAIT = 5'd21,  // espera tx_done_tick, desplaza el shift register o pasa al proximo latch
+    ST_DUMPMEM_RD       = 5'd22;  // dmem ahora es BRAM (lectura sincrona): el dato llega 1 ciclo despues de presentar la direccion
 
   reg [4:0] state_reg, state_next;
 
@@ -324,16 +325,24 @@ module debug_unit (
 
       // Punto de chequeo: si ya no queda nada por mandar (cantidad=0, ya
       // sea porque el host pidio 0 bytes o porque ya se mandaron todos),
-      // termina sin mandar nada mas.
+      // termina sin mandar nada mas. Si queda algo, presenta la direccion:
+      // dmem es una BRAM con lectura sincrona, el byte llega recien en el
+      // ciclo siguiente (ST_DUMPMEM_RD).
       ST_DUMPMEM_TX: begin
         if (dump_mem_len_reg == 16'd0) begin
           state_next = ST_IDLE;
         end else begin
           dmem_debug_addr = dump_mem_addr_reg[`DMEM_ADDR_W-1:0];
-          tx_data         = dmem_debug_data;
-          tx_start        = 1'b1;
-          state_next      = ST_DUMPMEM_WAIT;
+          state_next      = ST_DUMPMEM_RD;
         end
+      end
+
+      // El byte ya esta registrado a la salida de dmem: se manda.
+      ST_DUMPMEM_RD: begin
+        dmem_debug_addr = dump_mem_addr_reg[`DMEM_ADDR_W-1:0];
+        tx_data         = dmem_debug_data;
+        tx_start        = 1'b1;
+        state_next      = ST_DUMPMEM_WAIT;
       end
 
       ST_DUMPMEM_WAIT: begin
