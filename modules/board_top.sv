@@ -15,7 +15,7 @@ module board_top (
 
     // el core se mantiene en reset hasta que el MMCM enganche
     system_top #(
-        .CLK_FREQ (55_000_000),   // MUY IMPORTANTE: el baud depende de esto
+        .CLK_FREQ (90_000_000),   // MUY IMPORTANTE: el baud depende de esto
         .BAUD_RATE(9600)
     ) u_sys (
         .clk      (clk_core),

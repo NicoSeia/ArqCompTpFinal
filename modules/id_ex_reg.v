@@ -68,9 +68,41 @@ module id_ex_reg (
     output reg  [2:0]  q_imm_src
 );
 
+  // ---------------------------------------------------------------------
+  // flush solo limpia lo que define una burbuja: valid y las senales de
+  // control con efecto (reg_write, mem_read, mem_write, branch, jump, jalr).
+  // Con eso la instruccion que sigue en EX no escribe registros, no accede
+  // a memoria y no redirige. El resto (datos, numeros de registro, wb_src,
+  // alu_op, etc.) solo se interpreta si alguna de esas senales esta en 1,
+  // asi que no hace falta limpiarlo.
+  // Resultado: flush (derivado de redirect, camino critico) maneja 7
+  // flip-flops en vez de ~195. Nota: flush nunca coincide con stall
+  // (pipeline_top lo gatea con run_enable), asi que cargar los datos
+  // durante un flush es inofensivo.
+  // rst sigue limpiando todo.
+  // ---------------------------------------------------------------------
   always @(posedge clk) begin
     if (rst || flush) begin
       q_valid        <= 1'b0;
+      q_reg_write    <= 1'b0;
+      q_mem_read     <= 1'b0;
+      q_mem_write    <= 1'b0;
+      q_branch       <= 1'b0;
+      q_jump         <= 1'b0;
+      q_jalr         <= 1'b0;
+    end else if (!stall) begin
+      q_valid        <= d_valid;
+      q_reg_write    <= d_reg_write;
+      q_mem_read     <= d_mem_read;
+      q_mem_write    <= d_mem_write;
+      q_branch       <= d_branch;
+      q_jump         <= d_jump;
+      q_jalr         <= d_jalr;
+    end
+  end
+
+  always @(posedge clk) begin
+    if (rst) begin
       q_pc           <= 32'd0;
       q_pc_plus4     <= 32'd0;
       q_rs1_data     <= 32'd0;
@@ -80,20 +112,13 @@ module id_ex_reg (
       q_rs2          <= 5'd0;
       q_rd           <= 5'd0;
       q_funct3       <= 3'd0;
-      q_reg_write    <= 1'b0;
-      q_mem_read     <= 1'b0;
-      q_mem_write    <= 1'b0;
       q_wb_src       <= 2'd0;
       q_alu_src      <= 1'b0;
-      q_branch       <= 1'b0;
-      q_jump         <= 1'b0;
-      q_jalr         <= 1'b0;
       q_mem_unsigned <= 1'b0;
       q_alu_op       <= 4'd0;
       q_mem_size     <= 2'd0;
       q_imm_src      <= 3'd0;
     end else if (!stall) begin
-      q_valid        <= d_valid;
       q_pc           <= d_pc;
       q_pc_plus4     <= d_pc_plus4;
       q_rs1_data     <= d_rs1_data;
@@ -103,14 +128,8 @@ module id_ex_reg (
       q_rs2          <= d_rs2;
       q_rd           <= d_rd;
       q_funct3       <= d_funct3;
-      q_reg_write    <= d_reg_write;
-      q_mem_read     <= d_mem_read;
-      q_mem_write    <= d_mem_write;
       q_wb_src       <= d_wb_src;
       q_alu_src      <= d_alu_src;
-      q_branch       <= d_branch;
-      q_jump         <= d_jump;
-      q_jalr         <= d_jalr;
       q_mem_unsigned <= d_mem_unsigned;
       q_alu_op       <= d_alu_op;
       q_mem_size     <= d_mem_size;

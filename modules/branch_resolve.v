@@ -5,7 +5,7 @@ module branch_resolve (
     input  wire [31:0] pc,         // pc de la instrucción que está en EX
     input  wire [31:0] imm,
     input  wire [31:0] rs1_data,
-    input  wire        alu_zero,
+    input  wire        rs_equal,      // rs1 == rs2 (lo calcula quien instancia, ver nota)
     input  wire [2:0]  funct3,
     input  wire        branch,
     input  wire        jump,
@@ -16,9 +16,12 @@ module branch_resolve (
 
   wire branch_taken;
 
-  // beq (funct3=000): toma el salto si son iguales (alu_zero=1)
-  // bne (funct3=001): toma el salto si son distintos (alu_zero=0)
-  assign branch_taken = branch && (alu_zero ^ funct3[0]);
+  // beq (funct3=000): toma el salto si son iguales (rs_equal=1)
+  // bne (funct3=001): toma el salto si son distintos (rs_equal=0)
+  // Nota de timing: en el pipeline rs_equal sale de un comparador de
+  // igualdad dedicado (XOR + reduccion), NO de alu.zero, que viene detras
+  // de la resta de 32 bits y del mux de 11 operaciones de la ALU.
+  assign branch_taken = branch && (rs_equal ^ funct3[0]);
   assign redirect     = jump || branch_taken;
 
   always @* begin

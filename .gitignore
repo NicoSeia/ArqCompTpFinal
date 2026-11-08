@@ -7,3 +7,7 @@
 apuntes.md
 
 .venv
+
+/test_verification/out
+
+*/__pycache__/

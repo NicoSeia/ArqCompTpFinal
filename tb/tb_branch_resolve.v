@@ -2,7 +2,7 @@ module tb_branch_resolve;
 
   reg  [31:0] pc, imm, rs1_data;
   wire [31:0] redirect_pc;
-  reg         alu_zero;
+  reg         rs_equal;
   wire        redirect;
   reg  [2:0]  funct3;
   reg         branch, jump, jalr;
@@ -11,7 +11,7 @@ module tb_branch_resolve;
   integer checks = 0;
 
   branch_resolve dut (
-      .pc(pc), .imm(imm), .rs1_data(rs1_data), .alu_zero(alu_zero),
+      .pc(pc), .imm(imm), .rs1_data(rs1_data), .rs_equal(rs_equal),
       .funct3(funct3), .branch(branch), .jump(jump), .jalr(jalr),
       .redirect(redirect), .redirect_pc(redirect_pc)
   );
@@ -39,30 +39,30 @@ module tb_branch_resolve;
     rs1_data = 32'd0;
 
     // --- sin branch ni jump: no hay redirect ---
-    pc = 32'd100; imm = 32'd16; funct3 = 3'b000; alu_zero = 1'b0;
+    pc = 32'd100; imm = 32'd16; funct3 = 3'b000; rs_equal = 1'b0;
     branch = 0; jump = 0; jalr = 0;
     expect_redirect(1'b0, 32'd0, "sin branch/jump - no redirige");
 
-    // --- beq tomado (alu_zero=1, funct3=000) ---
-    branch = 1; funct3 = 3'b000; alu_zero = 1'b1;
+    // --- beq tomado (rs_equal=1, funct3=000) ---
+    branch = 1; funct3 = 3'b000; rs_equal = 1'b1;
     expect_redirect(1'b1, 32'd116, "beq tomado - pc+imm");  // 100+16
 
-    // --- beq no tomado (alu_zero=0, funct3=000) ---
-    alu_zero = 1'b0;
+    // --- beq no tomado (rs_equal=0, funct3=000) ---
+    rs_equal = 1'b0;
     expect_redirect(1'b0, 32'd0, "beq no tomado - no redirige");
 
-    // --- bne tomado (alu_zero=0, funct3=001) ---
-    funct3 = 3'b001; alu_zero = 1'b0;
+    // --- bne tomado (rs_equal=0, funct3=001) ---
+    funct3 = 3'b001; rs_equal = 1'b0;
     expect_redirect(1'b1, 32'd116, "bne tomado - pc+imm");
 
-    // --- bne no tomado (alu_zero=1, funct3=001) ---
-    alu_zero = 1'b1;
+    // --- bne no tomado (rs_equal=1, funct3=001) ---
+    rs_equal = 1'b1;
     expect_redirect(1'b0, 32'd0, "bne no tomado - no redirige");
 
     branch = 0;
 
-    // --- jal: pc+imm, sin importar alu_zero ---
-    jump = 1; jalr = 0; funct3 = 3'b000; alu_zero = 1'b0;
+    // --- jal: pc+imm, sin importar rs_equal ---
+    jump = 1; jalr = 0; funct3 = 3'b000; rs_equal = 1'b0;
     expect_redirect(1'b1, 32'd116, "jal - pc+imm");
 
     // --- jalr: rs1+imm con bit0 forzado a 0 ---

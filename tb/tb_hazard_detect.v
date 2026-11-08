@@ -1,8 +1,8 @@
 `include "riscv_defs.vh"
 module tb_hazard_detect;
 
-  reg                    id_ex_mem_read;
-  reg  [`REG_ADDR_W-1:0] id_ex_rd, rs1_id, rs2_id;
+  reg                    id_ex_mem_read, ex_mem_mem_read;
+  reg  [`REG_ADDR_W-1:0] id_ex_rd, ex_mem_rd, rs1_id, rs2_id;
   wire                   stall_load_use;
 
   integer errors = 0;
@@ -10,6 +10,7 @@ module tb_hazard_detect;
 
   hazard_detect dut (
       .id_ex_mem_read(id_ex_mem_read), .id_ex_rd(id_ex_rd),
+      .ex_mem_mem_read(ex_mem_mem_read), .ex_mem_rd(ex_mem_rd),
       .rs1_id(rs1_id), .rs2_id(rs2_id), .stall_load_use(stall_load_use)
   );
 
@@ -25,6 +26,7 @@ module tb_hazard_detect;
   endtask
 
   initial begin
+    ex_mem_mem_read = 1'b0; ex_mem_rd = 5'd0;
     // --- no es load: nunca frena, aunque los registros coincidan ---
     id_ex_mem_read = 1'b0; id_ex_rd = 5'd3; rs1_id = 5'd3; rs2_id = 5'd7;
     check(1'b0, "no es load - no frena aunque coincida");
@@ -48,6 +50,30 @@ module tb_hazard_detect;
     // --- exclusion: rd=x0, aunque "coincida" nunca frena ---
     id_ex_rd = 5'd0; rs1_id = 5'd0; rs2_id = 5'd0;
     check(1'b0, "exclusion x0 - nunca frena aunque coincida");
+
+    // --- load en MEM (etapa nueva): el dato se consume por bypass del regfile en WB ---
+    id_ex_mem_read = 1'b0; id_ex_rd = 5'd0;
+    ex_mem_mem_read = 1'b1; ex_mem_rd = 5'd4; rs1_id = 5'd4; rs2_id = 5'd9;
+    check(1'b1, "load en MEM, hazard en rs1 - frena");
+
+    rs1_id = 5'd9; rs2_id = 5'd4;
+    check(1'b1, "load en MEM, hazard en rs2 - frena");
+
+    rs1_id = 5'd1; rs2_id = 5'd2;
+    check(1'b0, "load en MEM sin coincidencia - no frena");
+
+    ex_mem_mem_read = 1'b0; rs1_id = 5'd4; rs2_id = 5'd4;
+    check(1'b0, "MEM no es load (ALU) - no frena, se reenvia por forwarding");
+
+    ex_mem_mem_read = 1'b1; ex_mem_rd = 5'd0; rs1_id = 5'd0; rs2_id = 5'd0;
+    check(1'b0, "load en MEM con rd=x0 - nunca frena");
+
+    // --- load en EX y en MEM a la vez, solo uno coincide ---
+    id_ex_mem_read = 1'b1; id_ex_rd = 5'd6; ex_mem_mem_read = 1'b1; ex_mem_rd = 5'd7;
+    rs1_id = 5'd7; rs2_id = 5'd1;
+    check(1'b1, "load en EX (no coincide) y en MEM (coincide) - frena");
+    rs1_id = 5'd1; rs2_id = 5'd1;
+    check(1'b0, "load en EX y MEM, ninguno coincide - no frena");
 
     if (errors == 0)
       $display("HAZARD_DETECT_TB: %0d/%0d checks OK", checks, checks);

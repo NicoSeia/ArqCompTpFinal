@@ -128,11 +128,17 @@ module tb_id_ex_reg;
     check_field(q_rd, 5'd9, "stall congela rd");
     stall = 0;
 
-    // flush: limpia todo a 0
+    // flush: limpia valid y las senales de control con efecto (burbuja);
+    // los campos de datos NO se limpian (decision de timing: 7 FF en vez de ~195)
     flush = 1;
     @(posedge clk); #1;
     check_bit(q_valid, 1'b0, "flush limpia valid");
     check_bit(q_reg_write, 1'b0, "flush limpia reg_write");
+    check_bit(q_mem_read, 1'b0, "flush limpia mem_read");
+    check_bit(q_mem_write, 1'b0, "flush limpia mem_write");
+    check_bit(q_branch, 1'b0, "flush limpia branch");
+    check_bit(q_jump, 1'b0, "flush limpia jump");
+    check_bit(q_jalr, 1'b0, "flush limpia jalr");
     flush = 0;
 
     if (errors == 0)

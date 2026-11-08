@@ -28,11 +28,11 @@ PIPELINE_SRCS = modules/pc_reg.v modules/imem.v modules/regfile.v modules/imm_ge
 
 SYSTEM_SRCS = $(PIPELINE_SRCS) $(DEBUG_DIR)/debug_unit.v \
               $(DEBUG_DIR)/baud_rate_gen.v $(DEBUG_DIR)/uart_rx.v \
-              $(DEBUG_DIR)/uart_tx.v $(DEBUG_DIR)/rx_fifo.v \
+              $(DEBUG_DIR)/uart_tx.v \
               modules/system_top.v
 
 # Regla por defecto: corre todos los módulos en orden
-all: alu regfile regfile_bypass imem dmem dmem_comb store_align load_extract imm_gen control_unit next_pc_logic if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top pipeline_mem debug_unit system_top
+all: alu regfile regfile_bypass imem dmem dmem_comb store_align load_extract imm_gen control_unit next_pc_logic if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect datapath_singlecycle pipeline_top pipeline_mem pipeline_hazards debug_unit system_top
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -129,6 +129,10 @@ pipeline_mem: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/pipeline_mem.vvp $(PIPELINE_SRCS) tb/tb_pipeline_mem.v
 	vvp $(BUILD_DIR)/pipeline_mem.vvp
 
+pipeline_hazards: $(BUILD_DIR)
+	iverilog $(IVFLAGS) -o $(BUILD_DIR)/pipeline_hazards.vvp $(PIPELINE_SRCS) tb/tb_pipeline_hazards.v
+	vvp $(BUILD_DIR)/pipeline_hazards.vvp
+
 # Debug unit: FSM
 debug_unit: $(BUILD_DIR)
 	iverilog $(IVFLAGS) -o $(BUILD_DIR)/debug_unit.vvp $(DEBUG_DIR)/debug_unit.v tb/tb_debug_unit.v
@@ -141,4 +145,4 @@ system_top: $(BUILD_DIR)
 clean:
 	rm -rf $(BUILD_DIR) *.vcd
 
-.PHONY: all clean alu dmem dmem_comb store_align load_extract imem imm_gen next_pc_logic regfile regfile_bypass control_unit datapath_singlecycle if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect pipeline_top pipeline_mem debug_unit system_top
+.PHONY: all clean alu dmem dmem_comb store_align load_extract imem imm_gen next_pc_logic regfile regfile_bypass control_unit datapath_singlecycle if_id_reg id_ex_reg ex_mem_reg mem_wb_reg branch_resolve forward_unit hazard_detect pipeline_top pipeline_mem pipeline_hazards debug_unit system_top

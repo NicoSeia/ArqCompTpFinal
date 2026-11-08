@@ -12,7 +12,7 @@ module tb_system_top;
   always #5 clk = ~clk;
 
   system_top #(
-      .NB_DATA(8), .CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD), .FIFO_W(8)
+      .NB_DATA(8), .CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD)
   ) dut (
       .clk(clk), .reset(reset), .rx_serial(rx_serial), .tx_serial(tx_serial)
   );
@@ -74,6 +74,19 @@ module tb_system_top;
     end
   endfunction
 
+  // RESET por serie: espera a que la DU REALMENTE lo reciba y termine el barrido de imem.
+  // (host_send_byte vuelve cuando el host termino de transmitir, antes de que la DU
+  //  complete la recepcion: esperar solo "ST_IDLE" aca es una carrera.)
+  task automatic host_reset;
+    begin
+      wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);  // sin buffer: la DU debe estar lista
+      host_send_byte(8'h00);
+      #40000;   // el barrido de RESET (~1024 ciclos) ya termino
+      wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);
+      #1;
+    end
+  endtask
+
   task automatic host_load_word(input [31:0] w);
     begin
       host_send_byte(8'h01);
@@ -100,9 +113,7 @@ module tb_system_top;
     reset = 0;
 
     // ================= RESET (byte serie real) =================
-    host_send_byte(8'h00);
-    wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);
-    #1;
+    host_reset;
 
     // ================= LOAD_WORD: addi x1,x0,42 (byte serie real) =================
     // instr = 0x02A00093, little-endian: 93 00 A0 02
@@ -150,9 +161,7 @@ module tb_system_top;
 
     // ======= 2do programa: stores + DUMP_MEM (dmem BRAM, lectura sincrona) =======
     //   addi x1,x0,42 ; sw x1,8(x0) ; sb x1,13(x0)
-    host_send_byte(8'h00);   // RESET
-    wait (dut.u_debug_unit.state_reg == dut.u_debug_unit.ST_IDLE);
-    #1;
+    host_reset;
     host_load_word(itype(12'd42, 5'd0, 3'b000, 5'd1, `OP_IMM));
     host_load_word(stype(12'd8,  5'd1, 5'd0, 3'b010, `OP_STORE));
     host_load_word(stype(12'd13, 5'd1, 5'd0, 3'b000, `OP_STORE));

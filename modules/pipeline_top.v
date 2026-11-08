@@ -43,7 +43,7 @@ module pipeline_top (
   // redirect/redirect_pc se declaran acá arriba porque IF los necesita
   // (para el mux de pc_next) y todavía no llegamos a EX, que es donde se
   // generan.
-  wire        redirect;
+  (* max_fanout = 16 *) wire        redirect;
   wire [31:0] redirect_pc;
 
   // stall_load_use, misma razón otra vez: pc_reg y el latch if_id lo
@@ -134,7 +134,12 @@ module pipeline_top (
   wire run_enable;  // 1 = se puede avanzar este ciclo (por ahora, solo enable)
 
   assign run_enable   = enable;
-  assign halt_trigger = halt_by_range || halt_by_illegal;
+  // halt_suppress: no se puede decidir el halt mientras haya un branch/jump sin
+  // resolver (en ID) o que se esta resolviendo ahora mismo (redirect en EX):
+  //  - illegal en ID justo detras de un salto tomado es camino equivocado (se flushea)
+  //  - pc >= program_len con un branch/jump en vuelo puede ser un salto hacia atras
+  wire halt_suppress;
+  assign halt_trigger = (halt_by_range || halt_by_illegal) && !halt_suppress;
 
   always @(posedge clk) begin
     if (rst) begin
@@ -185,8 +190,8 @@ module pipeline_top (
   // Ademas, el flush de IF/ID por halt se omite mientras hay stall_load_use:
   // IF/ID esta SOSTENIENDO una instruccion valida que todavia no se emitio
   // (la dependiente del load); se flushea recien cuando el stall termina.
-  wire if_id_flush = run_enable && (redirect || ((halt_trigger || halt_latched) && !stall_load_use));
-  wire id_ex_flush = run_enable && (redirect || stall_load_use);
+  (* max_fanout = 16 *) wire if_id_flush = run_enable && (redirect || ((halt_trigger || halt_latched) && !stall_load_use));
+  (* max_fanout = 16 *) wire id_ex_flush = run_enable && (redirect || stall_load_use);
 
   // flush por halt: usa halt_trigger (combinacional) para cortar YA en el
   // mismo ciclo en que se detecta -- si usara solo halt_latched (que recién
@@ -219,6 +224,7 @@ module pipeline_top (
   );
 
   assign halt_by_illegal = illegal_id && ifid_q_valid;
+  assign halt_suppress   = redirect || (ifid_q_valid && (ctrl_id_branch || ctrl_id_jump));
 
   wire [31:0] imm_id;
   imm_gen u_imm (.instr(ifid_q_instr), .imm_src(ctrl_id_imm_src), .imm(imm_id));
@@ -283,6 +289,7 @@ module pipeline_top (
   // --- Detección de load-use (afecta IF/ID, se calcula acá porque necesita ctrl_ex) ---
   hazard_detect u_hazard (
       .id_ex_mem_read(idex_q_mem_read), .id_ex_rd(idex_q_rd),
+      .ex_mem_mem_read(exmem_q_mem_read), .ex_mem_rd(exmem_q_rd),
       .rs1_id(fields_id[`INSTR_RS1]), .rs2_id(fields_id[`INSTR_RS2]),
       .stall_load_use(stall_load_use)
   );
@@ -305,36 +312,50 @@ module pipeline_top (
   wire [31:0] ex_mem_fwd_val;
   assign ex_mem_fwd_val = (exmem_q_wb_src == `WB_PC4) ? exmem_q_pc_plus4 : exmem_q_alu_result;
 
+  // Valor forwardeable desde MEM/WB: SOLO resultados que no vienen de la
+  // BRAM (ALU o PC+4). El dato de un load no se reenvia al EX: la
+  // dependiente espera (hazard_detect) y lo recibe por el bypass del
+  // regfile en ID. Asi la salida de la BRAM y load_extract no alimentan a
+  // la ALU ni al comparador de branch (camino critico).
+  wire [31:0] wb_fwd_val;
+  assign wb_fwd_val = (memwb_q_wb_src == `WB_PC4) ? memwb_q_pc_plus4 : memwb_q_alu_result;
+
   reg [31:0] rs1_fwd, rs2_fwd;
   always @* begin
     case (forward_a)
       `FWD_EX_MEM: rs1_fwd = ex_mem_fwd_val;
-      `FWD_MEM_WB: rs1_fwd = wb_data;
+      `FWD_MEM_WB: rs1_fwd = wb_fwd_val;
       default:     rs1_fwd = idex_q_rs1_data;
     endcase
   end
   always @* begin
     case (forward_b)
       `FWD_EX_MEM: rs2_fwd = ex_mem_fwd_val;
-      `FWD_MEM_WB: rs2_fwd = wb_data;
+      `FWD_MEM_WB: rs2_fwd = wb_fwd_val;
       default:     rs2_fwd = idex_q_rs2_data;
     endcase
   end
 
   wire [31:0] alu_b_ex, alu_result_ex;
-  wire        alu_zero_ex;
   assign alu_b_ex = idex_q_alu_src ? idex_q_imm : rs2_fwd;
+
+  // Comparador de igualdad dedicado para beq/bne (XOR + reduccion), en
+  // paralelo a la ALU. Antes se usaba alu.zero, que sale despues de la
+  // resta de 32 bits y del mux de operaciones de la ALU: camino mucho
+  // mas largo hacia redirect.
+  wire rs_equal_ex;
+  assign rs_equal_ex = (rs1_fwd == rs2_fwd);
 
   alu u_alu (
       .a(rs1_fwd), .b(alu_b_ex), .op(idex_q_alu_op),
-      .result(alu_result_ex), .zero(alu_zero_ex)
+      .result(alu_result_ex), .zero()
   );
 
   // rs1_data acá también tiene que ser el forwardeado: si no, un jalr cuyo
   // rs1 se escribió una o dos instrucciones antes calcularía mal el target.
   branch_resolve u_branch (
       .pc(idex_q_pc), .imm(idex_q_imm), .rs1_data(rs1_fwd),
-      .alu_zero(alu_zero_ex), .funct3(idex_q_funct3),
+      .rs_equal(rs_equal_ex), .funct3(idex_q_funct3),
       .branch(idex_q_branch), .jump(idex_q_jump), .jalr(idex_q_jalr),
       .redirect(redirect), .redirect_pc(redirect_pc)
   );

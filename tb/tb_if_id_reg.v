@@ -71,11 +71,13 @@ module tb_if_id_reg;
     check_word(q_instr, 32'hAAAA_0003, "stall congela instr");
     stall = 0;
 
-    // flush: limpia todo el latch a 0, sin importar la entrada
+    // flush: carga burbuja (valid=0, instr=0); pc/pc_plus4 NO se limpian
+    // (decision de timing: flush maneja 33 FF en vez de 97)
     flush = 1;
+    d_valid = 1; d_pc = 32'hCAFE_0001; d_pc_plus4 = 32'hCAFE_0002; d_instr = 32'hCAFE_0003;
     @(posedge clk); #1;
     check_bit(q_valid, 1'b0, "flush limpia valid");
-    check_word(q_pc, 32'd0, "flush limpia pc");
+    check_word(q_instr, 32'd0, "flush limpia instr (burbuja)");
     flush = 0;
 
     // vuelve a cargar normal despues del flush

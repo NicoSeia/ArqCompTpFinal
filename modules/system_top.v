@@ -3,8 +3,7 @@
 module system_top #(
     parameter NB_DATA   = 8,
     parameter CLK_FREQ  = 100_000_000,
-    parameter BAUD_RATE = 9600,
-    parameter FIFO_W    = 8
+    parameter BAUD_RATE = 9600
 ) (
     input  wire clk,
     input  wire reset,
@@ -26,6 +25,14 @@ module system_top #(
       .tick (s_tick)
   );
 
+  // rx_serial es asincrono respecto de clk: sincronizador de 2 flip-flops
+  reg rx_sync0, rx_sync1;
+  always @(posedge clk) begin
+    if (reset) begin rx_sync0 <= 1'b1; rx_sync1 <= 1'b1; end
+    else       begin rx_sync0 <= rx_serial; rx_sync1 <= rx_sync0; end
+  end
+  wire rx_sync = rx_sync1;
+
   wire               rx_done_tick;
   wire [NB_DATA-1:0] rx_data_out;
 
@@ -35,30 +42,18 @@ module system_top #(
   ) u_uart_rx (
       .clk         (clk),
       .reset       (reset),
-      .rx          (rx_serial),
+      .rx          (rx_sync),
       .s_tick      (s_tick),
       .rx_done_tick(rx_done_tick),
       .data_out    (rx_data_out)
   );
 
-  wire               fifo_empty;
-  wire               fifo_full;
-  wire [NB_DATA-1:0] fifo_r_data;
-  wire               fifo_rd;
-
-  rx_fifo #(
-      .B(NB_DATA),
-      .W(FIFO_W)
-  ) u_rx_fifo (
-      .clk   (clk),
-      .reset (reset),
-      .rd    (fifo_rd),
-      .wr    (rx_done_tick),
-      .w_data(rx_data_out),
-      .empty (fifo_empty),
-      .full  (fifo_full),
-      .r_data(fifo_r_data)
-  );
+  // Sin FIFO ni buffer: el protocolo es pedido/respuesta, el host manda un
+  // byte y la Debug Unit lo consume. uart_rx da un pulso (rx_done_tick) y
+  // mantiene data_out estable hasta el proximo frame (~5000 ciclos despues),
+  // asi que la DU lo usa directo: "hay dato" = pulso de 1 ciclo.
+  wire               rx_empty = ~rx_done_tick;
+  wire               rx_rd;      // la DU lo levanta, pero no hace falta (sin buffer)
 
   wire               tx_start;
   wire [NB_DATA-1:0] tx_data_in;
@@ -110,9 +105,9 @@ module system_top #(
       .clk  (clk),
       .reset(reset),
 
-      .rx_empty(fifo_empty),
-      .rx_data (fifo_r_data),
-      .rx_rd   (fifo_rd),
+      .rx_empty(rx_empty),
+      .rx_data (rx_data_out),
+      .rx_rd   (rx_rd),
 
       .tx_done_tick(tx_done_tick),
       .tx_start    (tx_start),
